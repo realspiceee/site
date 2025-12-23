@@ -1,46 +1,40 @@
 <?php
 // includes/functions.php
 
-if (!function_exists('h')) {
-    function h($text) {
-        return htmlspecialchars($text ?? '', ENT_QUOTES, 'UTF-8');
-    }
+function h(string $value): string {
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-if (!function_exists('getCurrentUser')) {
-    function getCurrentUser() {
-        require_once __DIR__ . '/auth.php';
-        $auth = new Auth();
-        return $auth->getCurrentUser();
-    }
+function redirect(string $path): void {
+    header('Location: ' . BASE_URL . '/' . ltrim($path, '/'));
+    exit;
 }
 
-if (!function_exists('requireLogin')) {
-    function requireLogin() {
-        $user = getCurrentUser();
-        if (!$user) {
-            $return = urlencode($_SERVER['REQUEST_URI'] ?? 'index.php');
-            header('Location: login.php?return=' . $return);
-            exit;
-        }
-        return $user;
-    }
+function is_post(): bool {
+    return $_SERVER['REQUEST_METHOD'] === 'POST';
 }
 
-if (!function_exists('requireRole')) {
-    function requireRole($role) {
-        require_once __DIR__ . '/auth.php';
-        $auth = new Auth();
-        if (!$auth->hasRole($role)) {
-            http_response_code(403);
-            die('Доступ запрещён');
-        }
-    }
+function current_url(): string {
+    $uri = $_SERVER['REQUEST_URI'] ?? '/';
+    return strtok($uri, '?');
 }
 
-if (!function_exists('redirectTo')) {
-    function redirectTo($url) {
-        header('Location: ' . $url);
-        exit;
+function active_link(string $path): string {
+    $current = current_url();
+    $full    = BASE_URL . $path;
+    return $current === $full ? 'nav-link-active' : '';
+}
+
+/**
+ * Общее количество товаров в корзине (по сессии)
+ */
+function getCartCount(): int {
+    if (!isset($_SESSION['cart']['items']) || !is_array($_SESSION['cart']['items'])) {
+        return 0;
     }
+    $total = 0;
+    foreach ($_SESSION['cart']['items'] as $qty) {
+        $total += (int)$qty;
+    }
+    return $total;
 }

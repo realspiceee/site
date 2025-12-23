@@ -1,62 +1,90 @@
 <?php
-require_once 'includes/init.php';
+require_once __DIR__ . '/includes/init.php';
 
-$error = '';
+// Выход
+if (isset($_GET['logout'])) {
+    $auth->logout();
+    redirect('index.php');
+}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        $auth->login($_POST['email'] ?? '', $_POST['password'] ?? '');
-        $return = $_GET['return'] ?? 'index.php';
-        redirectTo($return);
-    } catch (Exception $e) {
-        $error = $e->getMessage();
+$errors = [];
+
+if (is_post()) {
+    $email    = trim($_POST['email'] ?? '');
+    $password = $_POST['password'] ?? '';
+
+    $result = $auth->login($email, $password);
+    if ($result['success']) {
+        // куда вернуть пользователя после логина
+        $return = $_GET['return'] ?? (BASE_URL . '/index.php');
+        // если return без домена, добавим BASE_URL только один раз
+        if (!str_starts_with($return, BASE_URL)) {
+            $return = BASE_URL . '/' . ltrim($return, '/');
+        }
+        header('Location: ' . $return);
+        exit;
+    } else {
+        $errors[] = $result['error'] ?? 'Ошибка входа.';
     }
 }
+
+include __DIR__ . '/navbar.php';
 ?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Вход – ShoeStore</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="assets/style.css">
-</head>
-<body class="auth-body">
-<div class="auth-wrapper">
-    <div class="auth-card">
-        <div class="auth-brand">
-            <a href="index.php">👟 ShoeStore</a>
-        </div>
-        <h1 class="auth-title">Вход в аккаунт</h1>
-        <p className="auth-subtitle">Чтобы перейти к корзине и заказам, авторизуйтесь.</p>
 
-        <?php if ($error): ?>
-            <div class="alert alert-error"><?= h($error); ?></div>
-        <?php endif; ?>
+<section class="section">
+    <div class="container">
+        <div class="form-card">
+            <h1>Вход в аккаунт</h1>
 
-        <form method="post" class="auth-form">
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" name="email" required
-                       value="<?= h($_POST['email'] ?? ''); ?>" placeholder="you@example.com">
-            </div>
-            <div class="form-group">
-                <label>Пароль</label>
-                <input type="password" name="password" required placeholder="••••••••">
-            </div>
-            <button type="submit" class="btn btn-primary btn-full">Войти</button>
-        </form>
+            <?php if ($errors): ?>
+                <div class="alert alert-error">
+                    <?= h(implode(' ', $errors)) ?>
+                </div>
+            <?php endif; ?>
 
-        <div class="auth-footer">
-            <span>Нет аккаунта?</span> <a href="register.php">Зарегистрироваться</a>
-        </div>
+            <form method="post">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input
+                        class="form-control"
+                        type="email"
+                        id="email"
+                        name="email"
+                        value="<?= h($_POST['email'] ?? '') ?>"
+                        required
+                    >
+                </div>
 
-        <div class="auth-demo">
-            <p>Тестовые аккаунты:</p>
-            <p>Admin: <code>admin@store.com</code> / <code>admin123</code></p>
-            <p>User: <code>user@test.com</code> / <code>user123</code></p>
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input
+                        class="form-control"
+                        type="password"
+                        id="password"
+                        name="password"
+                        required
+                    >
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width:100%; margin-top:0.8rem;">
+                    Войти
+                </button>
+
+                <p class="form-help" style="margin-top:0.8rem;">
+                    Нет аккаунта? <a href="<?= BASE_URL ?>/register.php">Зарегистрироваться</a>
+                </p>
+            </form>
         </div>
     </div>
-</div>
+</section>
+
+</main>
+<footer class="site-footer">
+    <div class="container footer-inner">
+        <span>&copy; <?= date('Y') ?> ShoeSpace.</span>
+        <span>Безопасный вход с bcrypt.</span>
+    </div>
+</footer>
+<script src="<?= BASE_URL ?>/assets/script.js"></script>
 </body>
 </html>

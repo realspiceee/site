@@ -1,35 +1,65 @@
 <?php
-require_once 'includes/functions.php';
-$user = getCurrentUser();
-$cartCount = getCartCount();
+// navbar.php
+require_once __DIR__ . '/includes/init.php';
+
+// текущий пользователь
+$user = $auth->user();
 ?>
-<nav class="navbar">
-    <div class="nav-container">
-        <a href="index.php" class="nav-brand">👟 ShoeStore</a>
-        
-        <div class="nav-search">
-            <form method="GET" action="index.php">
-                <input type="text" name="search" placeholder="Поиск товаров..." value="<?= h($_GET['search'] ?? '') ?>">
-                <button type="submit">🔍</button>
-            </form>
-        </div>
-        
-        <div class="nav-links">
-            <a href="index.php">Главная</a>
-            <a href="catalog.php">Каталог</a>
-            <a href="cart.php">🛒 <?= $cartCount ?></a>
-            
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title><?= h(SITE_TITLE) ?></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="<?= BASE_URL ?>/assets/style.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="container header-inner">
+        <a href="<?= BASE_URL ?>/index.php" class="logo">
+            <span class="logo-mark">S</span>
+            <span class="logo-text">ShoeSpace</span>
+        </a>
+
+        <div class="header-actions">
+            <!-- Кнопка Каталог -->
+            <a href="<?= BASE_URL ?>/catalog.php" class="btn btn-outline">
+                Каталог
+            </a>
+
+            <!-- Кнопка Заказы -->
+            <a href="<?= BASE_URL ?>/orders.php" class="btn btn-outline">
+                Заказы
+            </a>
+
+            <!-- Кнопка Корзина -->
+            <a href="<?= BASE_URL ?>/cart.php" class="btn btn-outline" style="padding-left:0.8rem; padding-right:0.8rem;">
+                <span class="icon-cart" style="margin-right:0.4rem;"></span>
+                <span>Корзина</span>
+                <span class="cart-count" id="cart-count"><?= getCartCount(); ?></span>
+            </a>
+
             <?php if ($user): ?>
-                <a href="profile.php">👤 <?= h($user['name']) ?></a>
-                <a href="orders.php">Заказы</a>
-                <?php if ($user['role'] == 'admin' || $user['role'] == 'manager'): ?>
-                    <a href="admin/dashboard.php" class="admin-link">⚙️ Админка</a>
-                <?php endif; ?>
-                <a href="index.php?logout=1">Выйти</a>
+                <!-- Выпадающее меню пользователя -->
+                <div class="user-menu">
+                    <span class="user-name"><?= h($user['name']) ?></span>
+                    <div class="user-menu-dropdown">
+                        <a href="<?= BASE_URL ?>/profile.php">Профиль</a>
+                        <a href="<?= BASE_URL ?>/orders.php">Мои заказы</a>
+                        <a href="<?= BASE_URL ?>/login.php?logout=1">Выйти</a>
+                    </div>
+                </div>
             <?php else: ?>
-                <a href="login.php">Войти</a>
-                <a href="register.php">Регистрация</a>
+                <!-- ВХОД -->
+                <a href="<?= BASE_URL ?>/login.php" class="btn btn-outline">
+                    Войти
+                </a>
+                <!-- РЕГИСТРАЦИЯ -->
+                <a href="<?= BASE_URL ?>/register.php" class="btn btn-primary">
+                    Регистрация
+                </a>
             <?php endif; ?>
         </div>
     </div>
-</nav>
+</header>
+<main class="site-main">

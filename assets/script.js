@@ -1,89 +1,60 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Добавление в корзину
-    document.querySelectorAll('.add-to-cart').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            const productId = this.dataset.productId;
-            const size = document.getElementById('size-select')?.value;
-            const quantity = document.querySelector('input[name="quantity"]')?.value || 1;
-            
-            if (!size) {
-                alert('Выберите размер!');
-                return;
+// assets/script.js
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Делегирование для кнопок "Добавить в корзину"
+    document.body.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-add-to-cart]');
+        if (!btn) return;
+
+        const productId = btn.getAttribute('data-product-id');
+        const sizeId    = btn.getAttribute('data-size-id');
+        let quantity    = parseInt(btn.getAttribute('data-quantity') || '1', 10);
+
+        // если на карточке товара есть отдельное поле qty
+        const qtyInputId = btn.getAttribute('data-qty-input');
+        if (qtyInputId) {
+            const input = document.getElementById(qtyInputId);
+            if (input) {
+                const q = parseInt(input.value || '1', 10);
+                if (!isNaN(q) && q > 0) quantity = q;
             }
-            
-            fetch('api/cart.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'add',
-                    product_id: parseInt(productId),
-                    size: parseFloat(size),
-                    quantity: parseInt(quantity)
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification('✅ Товар добавлен в корзину!', 'success');
-                    updateCartCount(data.count);
-                } else {
-                    showNotification('❌ ' + (data.error || 'Ошибка'), 'error');
-                }
-            })
-            .catch(() => showNotification('❌ Ошибка соединения', 'error'));
-        });
-    });
-    
-    // Обновление количества в корзине
-    document.querySelectorAll('.qty-input').forEach(input => {
-        input.addEventListener('change', function() {
-            const itemId = this.dataset.itemId;
-            const quantity = this.value;
-            
-            fetch('api/cart.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'update',
-                    item_id: parseInt(itemId),
-                    quantity: parseInt(quantity)
-                })
-            });
-        });
-    });
-    
-    // Удаление из корзины
-    document.querySelectorAll('.remove-item').forEach(btn => {
-        btn.addEventListener('click', function() {
-            if (confirm('Удалить товар из корзины?')) {
-                const itemId = this.dataset.itemId;
-                fetch('api/cart.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'remove',
-                        item_id: parseInt(itemId)
-                    })
-                }).then(() => location.reload());
-            }
-        });
+        }
+
+        if (!productId || !sizeId) {
+            alert('Пожалуйста, выберите размер товара.');
+            return;
+        }
+
+        addToCart(productId, sizeId, quantity);
     });
 });
 
-function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => notification.remove(), 3000);
-}
-
-function updateCartCount(count) {
-    const cartLinks = document.querySelectorAll('.nav-links a[href="cart.php"]');
-    cartLinks.forEach(link => {
-        link.textContent = `🛒 ${count}`;
+function addToCart(productId, sizeId, quantity = 1) {
+    fetch('api/cart.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'add',
+            product_id: productId,
+            size_id: sizeId,
+            quantity: quantity
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            alert(data.error || 'Ошибка добавления в корзину');
+            return;
+        }
+        const countEl = document.getElementById('cart-count');
+        if (countEl && typeof data.cart_count !== 'undefined') {
+            countEl.textContent = data.cart_count;
+        }
+        // небольшой визуальный фидбек
+        alert('Товар добавлен в корзину');
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Ошибка связи с сервером при добавлении в корзину.');
     });
 }

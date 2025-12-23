@@ -1,175 +1,250 @@
 <?php
-require_once 'includes/init.php';
+require_once __DIR__ . '/includes/init.php';
+include __DIR__ . '/navbar.php';
 
-$page  = max(1, (int)($_GET['page'] ?? 1));
-$limit = 12;
-$offset = ($page - 1) * $limit;
+// Параметры фильтров из GET
+$page      = max(1, (int)($_GET['page'] ?? 1));
+$perPage   = 12;
+$offset    = ($page - 1) * $perPage;
 
-$where  = "WHERE p.status = 'active'";
+$category  = trim($_GET['category'] ?? '');
+$brand     = trim($_GET['brand'] ?? '');
+$color     = trim($_GET['color'] ?? '');
+$size      = trim($_GET['size'] ?? '');
+$priceFrom = (float)($_GET['price_from'] ?? 0);
+$priceTo   = (float)($_GET['price_to'] ?? 0);
+$search    = trim($_GET['q'] ?? '');
+$sort      = $_GET['sort'] ?? 'new';
+
+// Формирование WHERE
+$where  = ["p.status = 'active'"];
 $params = [];
 
-// фильтры
-if (!empty($_GET['category'])) {
-    $where .= " AND p.category = ?";
-    $params[] = $_GET['category'];
+if ($category !== '') {
+    $where[]  = 'p.category = ?';
+    $params[] = $category;
 }
-if (!empty($_GET['brand'])) {
-    $where .= " AND p.brand LIKE ?";
-    $params[] = '%' . $_GET['brand'] . '%';
+if ($brand !== '') {
+    $where[]  = 'p.brand = ?';
+    $params[] = $brand;
 }
-if (!empty($_GET['min_price'])) {
-    $where .= " AND p.price >= ?";
-    $params[] = (float)$_GET['min_price'];
+if ($color !== '') {
+    $where[]  = 'p.color = ?';
+    $params[] = $color;
 }
-if (!empty($_GET['max_price'])) {
-    $where .= " AND p.price <= ?";
-    $params[] = (float)$_GET['max_price'];
+if ($size !== '') {
+    $where[]  = 'EXISTS (SELECT 1 FROM product_sizes s WHERE s.product_id = p.id AND s.size = ? AND s.quantity > 0)';
+    $params[] = $size;
 }
-if (!empty($_GET['search'])) {
-    $where .= " AND (p.name LIKE ? OR p.description LIKE ?)";
-    $search = '%' . $_GET['search'] . '%';
-    $params[] = $search;
-    $params[] = $search;
+if ($priceFrom > 0) {
+    $where[]  = 'p.price >= ?';
+    $params[] = $priceFrom;
+}
+if ($priceTo > 0) {
+    $where[]  = 'p.price <= ?';
+    $params[] = $priceTo;
+}
+if ($search !== '') {
+    $where[]  = '(p.name LIKE ? OR p.description LIKE ?)';
+    $params[] = '%' . $search . '%';
+    $params[] = '%' . $search . '%';
 }
 
-// сортировка
+$whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+// Сортировка
 $orderBy = 'p.created_at DESC';
-if (!empty($_GET['sort'])) {
-    if ($_GET['sort'] === 'price_asc')  $orderBy = 'p.price ASC';
-    if ($_GET['sort'] === 'price_desc') $orderBy = 'p.price DESC';
+if ($sort === 'price_asc') {
+    $orderBy = 'p.price ASC';
+} elseif ($sort === 'price_desc') {
+    $orderBy = 'p.price DESC';
+} elseif ($sort === 'popular') {
+    $orderBy = 'p.created_at DESC'; // упрощенно
 }
 
-$total = $db->query("SELECT COUNT(*) FROM products p $where", $params)->fetchColumn();
-$totalPages = max(1, ceil($total / $limit));
+// Подсчёт общего количества
+$countSql = "SELECT COUNT(*) AS c FROM products p {$whereSql}";
+$total    = (int)$db->query($countSql, $params)->fetch()['c'];
+$totalPages = max(1, (int)ceil($total / $perPage));
 
-array_push($params, $limit, $offset);
-$products = $db->query("
-    SELECT p.*, pi.image_url,
-           (SELECT SUM(quantity) FROM product_sizes ps WHERE ps.product_id = p.id) AS total_stock
+// Получение товаров
+$listSql = "
+    SELECT p.*,
+           (SELECT image_url FROM product_images WHERE product_id = p.id AND is_main = 1 LIMIT 1) AS main_image
     FROM products p
-    LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_main = 1
-    $where
-    ORDER BY $orderBy
-    LIMIT ? OFFSET ?
-", $params)->fetchAll();
+    {$whereSql}
+    ORDER BY {$orderBy}
+    LIMIT {$perPage} OFFSET {$offset}
+";
+$products = $db->query($listSql, $params)->fetchAll();
+
+// Для фильтров получим уникальные бренды/категории/цвета/размеры
+$allBrands    = $db->query("SELECT DISTINCT brand FROM products WHERE status = 'active' AND brand IS NOT NULL ORDER BY brand")->fetchAll();
+$allCategories= $db->query("SELECT DISTINCT category FROM products WHERE status = 'active' AND category IS NOT NULL ORDER BY category")->fetchAll();
+$allColors    = $db->query("SELECT DISTINCT color FROM products WHERE status = 'active' AND color IS NOT NULL ORDER BY color")->fetchAll();
+$allSizes     = $db->query("SELECT DISTINCT size FROM product_sizes ORDER BY size")->fetchAll();
+
+function selected($a, $b) {
+    return (string)$a === (string)$b ? 'selected' : '';
+}
 ?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Каталог – ShoeStore</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="assets/style.css">
-</head>
-<body class="site-body">
-<header class="navbar">
-    <div class="nav-container">
-        <a href="index.php" class="nav-brand">👟 ShoeStore</a>
-        <nav class="nav-links">
-            <a href="index.php">Главная</a>
-            <a href="catalog.php" class="active">Каталог</a>
-            <a href="cart.php">Корзина (<?= $cart->getCount(); ?>)</a>
-            <?php if ($user): ?>
-                <a href="profile.php"><?= h($user['name']); ?></a>
-                <a href="orders.php">Заказы</a>
-                <a href="index.php?logout=1">Выход</a>
+
+<section class="section">
+    <div class="container section-header">
+        <h2>Каталог обуви</h2>
+    </div>
+</section>
+
+<section class="section">
+    <div class="container" style="display:flex; gap:1.5rem; align-items:flex-start;">
+        <!-- Фильтры -->
+        <aside style="flex:0 0 260px; max-width:260px;">
+            <form method="get" class="form-card" style="margin:0;">
+                <h2>Фильтры</h2>
+
+                <div class="form-group">
+                    <label for="q">Поиск</label>
+                    <input type="text" class="form-control" id="q" name="q"
+                           value="<?= h($search) ?>" placeholder="Название или описание">
+                </div>
+
+                <div class="form-group">
+                    <label>Категория</label>
+                    <select name="category" class="form-control">
+                        <option value="">Все</option>
+                        <?php foreach ($allCategories as $row): ?>
+                            <option value="<?= h($row['category']) ?>" <?= selected($category, $row['category']) ?>>
+                                <?= h($row['category']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Бренд</label>
+                    <select name="brand" class="form-control">
+                        <option value="">Все</option>
+                        <?php foreach ($allBrands as $row): ?>
+                            <option value="<?= h($row['brand']) ?>" <?= selected($brand, $row['brand']) ?>>
+                                <?= h($row['brand']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Цвет</label>
+                    <select name="color" class="form-control">
+                        <option value="">Все</option>
+                        <?php foreach ($allColors as $row): ?>
+                            <option value="<?= h($row['color']) ?>" <?= selected($color, $row['color']) ?>>
+                                <?= h($row['color']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Размер</label>
+                    <select name="size" class="form-control">
+                        <option value="">Все</option>
+                        <?php foreach ($allSizes as $row): ?>
+                            <option value="<?= h($row['size']) ?>" <?= selected($size, $row['size']) ?>>
+                                <?= h($row['size']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group" style="display:flex; gap:0.5rem;">
+                    <div style="flex:1;">
+                        <label>Цена от</label>
+                        <input type="number" step="0.01" min="0" name="price_from"
+                               class="form-control" value="<?= $priceFrom ?: '' ?>">
+                    </div>
+                    <div style="flex:1;">
+                        <label>до</label>
+                        <input type="number" step="0.01" min="0" name="price_to"
+                               class="form-control" value="<?= $priceTo ?: '' ?>">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Сортировка</label>
+                    <select name="sort" class="form-control">
+                        <option value="new" <?= selected($sort, 'new') ?>>Сначала новые</option>
+                        <option value="price_asc" <?= selected($sort, 'price_asc') ?>>Цена по возрастанию</option>
+                        <option value="price_desc" <?= selected($sort, 'price_desc') ?>>Цена по убыванию</option>
+                        <option value="popular" <?= selected($sort, 'popular') ?>>Популярность</option>
+                    </select>
+                </div>
+
+                <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                    <button type="submit" class="btn btn-primary" style="flex:1;">Показать</button>
+                    <a href="catalog.php" class="btn btn-outline" style="flex:1; text-align:center;">Сбросить</a>
+                </div>
+            </form>
+        </aside>
+
+        <!-- Список товаров -->
+        <div style="flex:1;">
+            <?php if ($total === 0): ?>
+                <p class="form-help">По выбранным фильтрам товаров не найдено.</p>
             <?php else: ?>
-                <a href="login.php">Вход</a>
-                <a href="register.php">Регистрация</a>
-            <?php endif; ?>
-        </nav>
-    </div>
-</header>
-
-<main class="page-wrapper">
-    <div class="page-header">
-        <h1>Каталог обуви</h1>
-        <p>Подбери пару по фильтрам: категория, бренд, цена и поиск по названию.</p>
-    </div>
-
-    <section class="filters-card">
-        <form method="get" class="filters-grid">
-            <div class="filter-field">
-                <label>Категория</label>
-                <select name="category">
-                    <option value="">Все</option>
-                    <option value="мужская" <?= ($_GET['category'] ?? '')=='мужская'?'selected':''; ?>>Мужская</option>
-                    <option value="женская" <?= ($_GET['category'] ?? '')=='женская'?'selected':''; ?>>Женская</option>
-                    <option value="детская" <?= ($_GET['category'] ?? '')=='детская'?'selected':''; ?>>Детская</option>
-                </select>
-            </div>
-            <div class="filter-field">
-                <label>Бренд</label>
-                <input type="text" name="brand" value="<?= h($_GET['brand'] ?? ''); ?>" placeholder="Nike, Adidas…">
-            </div>
-            <div class="filter-field">
-                <label>Цена от</label>
-                <input type="number" name="min_price" value="<?= h($_GET['min_price'] ?? ''); ?>">
-            </div>
-            <div class="filter-field">
-                <label>Цена до</label>
-                <input type="number" name="max_price" value="<?= h($_GET['max_price'] ?? ''); ?>">
-            </div>
-            <div class="filter-field">
-                <label>Поиск</label>
-                <input type="text" name="search" value="<?= h($_GET['search'] ?? ''); ?>" placeholder="Название или описание">
-            </div>
-            <div class="filter-field">
-                <label>Сортировка</label>
-                <select name="sort">
-                    <option value="">По умолчанию</option>
-                    <option value="price_asc"  <?= ($_GET['sort'] ?? '')=='price_asc'?'selected':''; ?>>Цена ↑</option>
-                    <option value="price_desc" <?= ($_GET['sort'] ?? '')=='price_desc'?'selected':''; ?>>Цена ↓</option>
-                </select>
-            </div>
-            <div class="filters-actions">
-                <button type="submit" class="btn btn-primary">Применить</button>
-                <a href="catalog.php" class="btn btn-secondary">Сбросить</a>
-            </div>
-        </form>
-    </section>
-
-    <section class="products-section">
-        <?php if (!$products): ?>
-            <p>По заданным параметрам ничего не найдено.</p>
-        <?php else: ?>
-            <div class="products-grid">
-                <?php foreach ($products as $p): ?>
+                <div class="products-grid">
+                    <?php foreach ($products as $product):
+                        $img = $product['main_image'] ?: 'no-image.png';
+                    ?>
                     <article class="product-card">
-                        <a href="product.php?id=<?= $p['id']; ?>" class="product-link">
-                            <div class="product-image">
-                                <img src="<?= $p['image_url'] ?: 'assets/images/no-image.png'; ?>"
-                                     alt="<?= h($p['name']); ?>">
-                                <?php if ((int)$p['total_stock'] === 0): ?>
-                                    <span class="badge">Нет в наличии</span>
-                                <?php endif; ?>
-                            </div>
-                            <div class="product-body">
-                                <h3><?= h($p['name']); ?></h3>
-                                <p class="product-meta">
-                                    <?= h($p['brand']); ?>
-                                    <?php if (!empty($p['category'])): ?>
-                                        • <?= h($p['category']); ?>
-                                    <?php endif; ?>
-                                </p>
-                                <p class="product-price"><?= number_format($p['price'], 0, ',', ' '); ?> ₽</p>
-                            </div>
-                        </a>
+                        <div class="product-image-wrap">
+                            <img src="<?= BASE_URL ?>/assets/images/<?= h($img) ?>" alt="<?= h($product['name']) ?>">
+                        </div>
+                        <div class="product-body">
+                            <h3><?= h($product['name']) ?></h3>
+                            <p class="product-meta">
+                                <?= h($product['brand']) ?> · <?= h($product['category']) ?>
+                            </p>
+                            <p class="product-price">
+                                <?= number_format($product['price'], 2, ',', ' ') ?> ₽
+                            </p>
+                            <a href="product.php?id=<?= (int)$product['id'] ?>" class="btn btn-sm btn-outline">
+                                Подробнее
+                            </a>
+                        </div>
                     </article>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </section>
+                    <?php endforeach; ?>
+                </div>
 
-    <?php if ($totalPages > 1): ?>
-        <nav class="pagination">
-            <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                <?php $qs = $_GET; $qs['page'] = $i; ?>
-                <a href="?<?= http_build_query($qs); ?>"
-                   class="page-link <?= $i == $page ? 'active' : ''; ?>"><?= $i; ?></a>
-            <?php endfor; ?>
-        </nav>
-    <?php endif; ?>
+                <!-- Пагинация -->
+                <?php if ($totalPages > 1): ?>
+                    <div style="margin-top:1.5rem; display:flex; justify-content:center; gap:0.4rem; flex-wrap:wrap;">
+                        <?php for ($p = 1; $p <= $totalPages; $p++): 
+                            $q = $_GET;
+                            $q['page'] = $p;
+                            $url = 'catalog.php?' . http_build_query($q);
+                            $isCurrent = $p === $page;
+                        ?>
+                            <a href="<?= h($url) ?>"
+                               class="btn btn-sm <?= $isCurrent ? 'btn-primary' : 'btn-outline' ?>">
+                                <?= $p ?>
+                            </a>
+                        <?php endfor; ?>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+</section>
+
 </main>
+
+<footer class="site-footer">
+    <div class="container footer-inner">
+        <span>&copy; <?= date('Y') ?> ShoeSpace. Все права защищены.</span>
+        <span>Каталог оптимизирован под фильтры и скорость.</span>
+    </div>
+</footer>
+
+<script src="<?= BASE_URL ?>/assets/script.js"></script>
 </body>
 </html>

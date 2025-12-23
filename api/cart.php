@@ -1,53 +1,56 @@
 <?php
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+// api/cart.php
+require_once __DIR__ . '/../includes/init.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
+header('Content-Type: application/json; charset=utf-8');
 
-require_once '../includes/config.php';
-require_once '../includes/cart.php';
+$raw = file_get_contents('php://input');
+$data = json_decode($raw, true) ?: [];
+
+$action    = $data['action']    ?? '';
+$productId = (int)($data['product_id'] ?? 0);
+$sizeId    = (int)($data['size_id'] ?? 0);
+$qty       = (int)($data['quantity'] ?? 1);
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true) ?: $_GET;
-    $cart = new Cart();
-    
-    switch ($input['action'] ?? '') {
+    switch ($action) {
         case 'add':
-            $cart->addItem($input['product_id'], $input['size'], $input['quantity'] ?? 1);
-            echo json_encode([
-                'success' => true,
-                'count' => $cart->getCount(),
-                'message' => 'Товар добавлен в корзину'
-            ]);
+            if ($productId <= 0 || $sizeId <= 0) {
+                throw new Exception('Некорректные данные товара.');
+            }
+            $cart->add($productId, $sizeId, max(1, $qty));
             break;
-            
+
         case 'update':
-            $cart->updateQuantity($input['item_id'], $input['quantity']);
-            echo json_encode(['success' => true]);
+            if ($productId <= 0 || $sizeId <= 0) {
+                throw new Exception('Некорректные данные товара.');
+            }
+            $cart->update($productId, $sizeId, max(0, $qty));
             break;
-            
+
         case 'remove':
-            $cart->removeItem($input['item_id']);
-            echo json_encode(['success' => true]);
+            if ($productId <= 0 || $sizeId <= 0) {
+                throw new Exception('Некорректные данные товара.');
+            }
+            $cart->update($productId, $sizeId, 0);
             break;
-            
-        case 'get':
-            $data = $cart->getItems();
-            echo json_encode($data);
+
+        case 'clear':
+            $cart->clear();
             break;
-            
+
         default:
-            throw new Exception('Неизвестное действие');
+            throw new Exception('Неизвестное действие.');
     }
+
+    echo json_encode([
+        'success'    => true,
+        'cart_count' => getCartCount(),
+        'total'      => $cart->total(),
+    ]);
 } catch (Exception $e) {
-    http_response_code(400);
     echo json_encode([
         'success' => false,
-        'error' => $e->getMessage()
+        'error'   => $e->getMessage(),
     ]);
 }
-?>

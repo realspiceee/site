@@ -1,74 +1,113 @@
 <?php
-require_once 'database.php';
+// includes/auth.php
 
 class Auth {
-    private $db;
-    
-    public function __construct() {
-        $this->db = new Database();
+    private Database $db;
+
+    public function __construct(Database $db)
+    {
+        $this->db = $db;
     }
-    
-    public function register($name, $email, $phone, $password) {
-        if ($this->findUserByEmail($email)) {
-            throw new Exception('Пользователь с таким email уже существует');
+
+    /**
+     * Текущий пользователь или null
+     */
+    public function user(): ?array
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return null;
         }
-        
-        if (strlen($password) < 6) {
-            throw new Exception('Пароль должен содержать минимум 6 символов');
-        }
-        
-        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
-        $this->db->query(
-            "INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, 'user')",
-            [$name, $email, $phone, $hashedPassword]
-        );
-        return true;
-    }
-    
-    public function login($email, $password) {
-        $user = $this->findUserByEmail($email);
-        if (!$user || !password_verify($password, $user['password']) || $user['is_blocked']) {
-            throw new Exception('Неверный email или пароль');
-        }
-        
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['user_role'] = $user['role'];
-        $_SESSION['last_activity'] = time();
-        
-        return $user;
-    }
-    
-    public function getCurrentUser() {
-        if (!isset($_SESSION['user_id'])) return null;
-        
-        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > SESSION_TIMEOUT)) {
+
+        $stmt = $this->db->query("SELECT * FROM users WHERE id = ?", [$_SESSION['user_id']]);
+        $user = $stmt->fetch();
+
+        // Если пользователя нет или он заблокирован — выходим из аккаунта
+        if (!$user || (int)$user['is_blocked'] === 1) {
             $this->logout();
             return null;
         }
-        
-        $_SESSION['last_activity'] = time();
-        return $this->db->query("SELECT * FROM users WHERE id = ?", [$_SESSION['user_id']])->fetch();
+
+        return $user;
     }
-    
-    public function logout() {
-        session_destroy();
-        session_start();
+
+    /**
+     * Регистрация нового пользователя
+     */
+    public function register(string $name, string $email, string $phone, string $password, string $passwordConfirm): array
+    {
+        $errors = [];
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Некорректный email.';
+        }
+        if ($password !== $passwordConfirm) {
+            $errors[] = 'Пароли не совпадают.';
+        }
+        if (strlen($password) < 6) {
+            $errors[] = 'Пароль должен быть не менее 6 символов.';
+        }
+
+        // Проверка уникальности email
+        $exists = $this->db->query("SELECT id FROM users WHERE email = ?", [$email])->fetch();
+        if ($exists) {
+            $errors[] = 'Пользователь с таким email уже существует.';
+        }
+
+        if ($name === '') {
+            $errors[] = 'Имя не может быть пустым.';
+        }
+
+        if ($errors) {
+            return ['success' => false, 'errors' => $errors];
+        }
+
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $this->db->query(
+            "INSERT INTO users (email,password,name,phone,role) VALUES (?,?,?,?,?)",
+            [$email, $hash, $name, $phone, 'user']
+        );
+
+        return ['success' => true];
     }
-    
-    public function hasRole($requiredRole) {
-        $user = $this->getCurrentUser();
-        if (!$user) return false;
-        
-        $roleWeights = ['admin' => 3, 'manager' => 2, 'user' => 1];
-        return ($roleWeights[$user['role']] ?? 0) >= ($roleWeights[$requiredRole] ?? 0);
+
+    /**
+     * Авторизация по email и паролю
+     */
+    public function login(string $email, string $password): array
+    {
+        $stmt = $this->db->query("SELECT * FROM users WHERE email = ?", [$email]);
+        $user = $stmt->fetch();
+
+        if (!$user || !password_verify($password, $user['password'])) {
+            return ['success' => false, 'error' => 'Неверный email или пароль.'];
+        }
+
+        if ((int)$user['is_blocked'] === 1) {
+            return ['success' => false, 'error' => 'Аккаунт заблокирован администратором.'];
+        }
+
+        $_SESSION['user_id'] = $user['id'];
+
+        return ['success' => true, 'user' => $user];
     }
-    
-    public function findUserByEmail($email) {
-        return $this->db->query("SELECT * FROM users WHERE email = ?", [$email])->fetch();
+
+    /**
+     * Выход из аккаунта
+     */
+    public function logout(): void
+    {
+        unset($_SESSION['user_id']);
     }
-    
-    public function findUserById($id) {
-        return $this->db->query("SELECT * FROM users WHERE id = ?", [$id])->fetch();
+
+    /**
+     * Требование роли (или списка ролей).
+     * При отсутствии доступа — редирект на login.php.
+     */
+    public function requireRole(array $roles): void
+    {
+        $user = $this->user();
+        if (!$user || !in_array($user['role'], $roles, true)) {
+            redirect('login.php?return=' . urlencode(current_url()));
+        }
     }
 }
-?>
